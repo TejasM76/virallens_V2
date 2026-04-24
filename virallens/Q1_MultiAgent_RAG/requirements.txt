@@ -1,0 +1,26 @@
+# Core
+langchain==0.3.25
+langgraph==0.4.1
+langchain-community==0.3.23
+langchain-groq==0.3.2
+
+# LLM Provider
+groq==0.28.0
+
+# Vector DB  (ChromaDB replaces FAISS — native metadata filtering)
+chromadb==0.6.3
+
+# Embeddings
+sentence-transformers==3.4.1
+
+# PDF loading
+pypdf==5.4.0
+
+# Config
+pydantic==2.11.4
+pydantic-settings==2.9.1
+python-dotenv==1.1.0
+
+# Utilities
+numpy==2.2.5
+tqdm==4.67.1

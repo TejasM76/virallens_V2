@@ -1,0 +1,23 @@
+# Orchestration & RAG (Q1)
+langchain
+langchain-groq
+langchain-huggingface
+langgraph
+chromadb
+langchain-chroma
+langchain-classic
+pypdf
+python-dotenv
+rank_bm25
+
+# Embeddings & Clustering (Q1 & Q2)
+sentence-transformers
+pandas
+PyPDF2
+scikit-learn
+matplotlib
+seaborn
+
+# Pinned PyTorch versions to prevent Windows circular import bug
+torch==2.4.1
+torchvision==0.19.1

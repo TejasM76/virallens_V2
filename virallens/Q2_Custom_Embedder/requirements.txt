@@ -1,0 +1,22 @@
+# Core ML
+sentence-transformers==3.4.1
+torch>=2.0.0
+numpy==2.2.5
+
+# Clustering + Evaluation
+scikit-learn==1.6.1
+scipy==1.15.3
+
+# PDF processing
+pypdf==5.4.0
+
+# Visualization
+matplotlib==3.10.1
+pandas==2.2.3
+
+# NLP (optional — falls back to nltk if spacy unavailable)
+nltk==3.9.1
+# spacy==3.7.5  # Optional: pip install spacy && python -m spacy download en_core_web_sm
+
+# Utilities
+tqdm==4.67.1
