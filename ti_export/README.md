@@ -17,6 +17,13 @@ pip install -r ti_export/requirements.txt
 2. `selectors.yaml`: replace every `PASTE_XPATH_HERE` (nav, filters, results, export dialog). Option XPaths use `{value}`, e.g. `//li[@role='option'][normalize-space(.)={value}]`. Fields set to `""` are skipped.
 3. `config.yaml`: check `industry`, the company names (EY) and each location's `aliases` against what the filters actually offer.
 
+## Finding / verifying XPaths (read-only, attaches to your logged-in browser)
+```bash
+python -m ti_export.probe dump    # open the page/dialog you want, run, then see out/probe.txt (elements + suggested XPaths)
+python -m ti_export.probe check   # after filling selectors.yaml: does each XPath match a visible element on the current page?
+```
+Open each part of the UI by hand first (filter panel, a suggestion list, the export dialog) and re-run `dump`; the probe never clicks or types.
+
 ## Run (from the repo root)
 ```bash
 python -m ti_export.runner --dry-run                                   # job matrix, names, aliases, skills
