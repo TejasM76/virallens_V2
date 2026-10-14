@@ -1,0 +1,48 @@
+# Paths are relative to this file.
+skills_workbook: input/Job Family Skills for Talent Insights 7419 1.xlsx
+sheet: 0
+function: Implement          # only rows with this Function are exported
+max_skill_columns: 8         # use Skill 1..8 only
+
+companies:                   # name = file label; optional `search` = text typed into the filter
+  - Accenture
+  - TCS
+  - Wipro
+  - EY GDS
+
+locations:                   # 13 listed in your note; add the 14th if there is one
+  - Bengaluru
+  - Delhi
+  - Mumbai
+  - Pune
+  - Bhubaneswar
+  - Hyderabad
+  - Chennai
+  - Coimbatore
+  - Kolkata
+  - Kochi
+  - Indore
+  - Visakhapatnam
+  - Lucknow
+  # - {name: Delhi, search: "Delhi, India"}   # example of a different search string
+
+report_url: PASTE_REPORT_URL_HERE
+selectors_file: selectors.yaml
+output_dir: out
+merge_header_row: 0          # row index of the header in the exported xlsx (adjust if the export has a preamble)
+
+browser:
+  name: chrome               # chrome | edge
+  mode: attach               # attach: start the browser with --remote-debugging-port=9222, log in yourself
+  debugger_address: 127.0.0.1:9222
+  user_data_dir: null        # only used when mode: launch
+
+pacing:
+  min_delay_s: 20
+  max_delay_s: 60
+  max_exports_per_session: 25
+  retries: 2
+  backoff_s: 15
+  wait_timeout_s: 30
+  download_timeout_s: 120
+  min_skills_matched: 1

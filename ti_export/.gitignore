@@ -1,0 +1,4 @@
+out/
+input/*.xlsx
+__pycache__/
+.pytest_cache/
