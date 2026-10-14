@@ -1,31 +1,44 @@
-# Replace every PASTE_XPATH_HERE with an XPath from the live Talent Insights page
+# Replace every PASTE_XPATH_HERE with an XPath from the live pages
 # (DevTools -> right-click element -> Copy -> Copy XPath, or write your own).
 # Option XPaths must contain {value}; it is replaced with the quoted text being searched, e.g.
 #   //li[@role='option'][contains(normalize-space(.), {value})]
+# For locations, prefer exact text (normalize-space(.)={value}) so aliases don't all click the same suggestion.
 # Fields set to "" are skipped. Leaving PASTE_XPATH_HERE anywhere stops the run.
 
-page_ready: PASTE_XPATH_HERE        # any element that proves the report page has loaded
+# --- LinkedIn home -> Business -> Talent Insights (done once per session) ---
+nav_business: PASTE_XPATH_HERE
+nav_talent_insights: PASTE_XPATH_HERE
+page_ready: PASTE_XPATH_HERE        # element proving the Talent Insights report page has loaded
 
-company:
+# --- Filters, applied in this order: location, skills, industry, company ---
+location:
   open: PASTE_XPATH_HERE            # button/header that expands the filter; clicked only if `input` is hidden
-  input: PASTE_XPATH_HERE           # text box to type the company into
+  input: PASTE_XPATH_HERE           # text box
   option: PASTE_XPATH_HERE          # suggestion row, uses {value}
   confirm: ""                       # optional per-filter Apply/Done button
-
-location:
+skills:
   open: PASTE_XPATH_HERE
   input: PASTE_XPATH_HERE
   option: PASTE_XPATH_HERE
   confirm: ""
-
-skills:
+industry:
+  open: PASTE_XPATH_HERE
+  input: PASTE_XPATH_HERE
+  option: PASTE_XPATH_HERE
+  confirm: ""
+company:
   open: PASTE_XPATH_HERE
   input: PASTE_XPATH_HERE
   option: PASTE_XPATH_HERE
   confirm: ""
 
 skills_match_any: ""                # optional: toggle/radio that sets skills to ANY (OR)
-apply_filters: ""                   # optional: global Apply/Update results button
+apply_filters: PASTE_XPATH_HERE     # set to "" if results refresh without an Apply button
 results_ready: PASTE_XPATH_HERE     # element that appears once results have refreshed
+
+# --- Export dialog: name -> Select all -> xlsx -> Save ---
 export_button: PASTE_XPATH_HERE
-export_confirm: ""                  # optional: confirm button inside the export dialog
+export_name_input: PASTE_XPATH_HERE
+export_select_all: PASTE_XPATH_HERE
+export_format_xlsx: PASTE_XPATH_HERE
+export_save: PASTE_XPATH_HERE

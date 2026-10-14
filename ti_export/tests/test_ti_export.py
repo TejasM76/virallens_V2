@@ -1,11 +1,10 @@
 import json
 from pathlib import Path
 
-import pandas as pd
 import pytest
 import yaml
 
-from ti_export.loader import build_jobs, load_family_skills
+from ti_export.loader import build_jobs
 from ti_export.models import Selectors, load_config, load_selectors
 from ti_export.runner import Manifest, fill_option, main, xpath_literal
 
@@ -13,63 +12,60 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
-def workspace(tmp_path):
-    rows = [
-        ["Advise", "Data Scientist", "Data Science"] + ["x"] * 7,
-        ["Implement", "ERP Implementation", "SAP S/4HANA", "SAP FICO", "SAP ABAP", "", "Oracle\nFusion  Applications",
-         "Workday", "Microsoft Dynamics 365", "ERP Implementations", "IGNORED_9", "SAP FICO"],
-        [None, "Cloud Implementation", "AWS", "Azure", "GCP", "Cloud Migration", "Kubernetes", "Terraform", "Docker", "CI/CD", "IGNORED_9", None],
+def cfg():
+    return load_config(ROOT / "config.yaml")
+
+
+def test_config_has_four_implement_families_with_eight_skills(cfg):
+    assert list(cfg.job_families) == [
+        "ERP Implementation", "Cloud Implementation", "System Integration", "Financial Planning & Analysis",
     ]
-    cols = ["Function", "Job Family"] + [f"Skill {i}" for i in range(1, 11)]
-    rows = [r + [None] * (len(cols) - len(r)) for r in rows]
-    pd.DataFrame(rows, columns=cols).to_excel(tmp_path / "skills.xlsx", index=False)
-    cfg = yaml.safe_load((ROOT / "config.yaml").read_text())
-    cfg["skills_workbook"] = "skills.xlsx"
-    (tmp_path / "config.yaml").write_text(yaml.safe_dump(cfg))
-    (tmp_path / "selectors.yaml").write_text((ROOT / "selectors.yaml").read_text())
-    return tmp_path
+    assert all(len(s) == 8 for s in cfg.job_families.values())
 
 
-def test_loader_uses_only_skill_1_to_8_and_implement(workspace):
-    cfg = load_config(workspace / "config.yaml")
-    fs = load_family_skills(cfg)
-    assert list(fs) == ["ERP Implementation", "Cloud Implementation"]  # merged-cell Function ffilled, Advise dropped
-    assert fs["ERP Implementation"] == [
-        "SAP S/4HANA", "SAP FICO", "SAP ABAP", "Oracle Fusion Applications", "Workday", "Microsoft Dynamics 365", "ERP Implementations",
-    ]
-    assert "IGNORED_9" not in sum(fs.values(), [])
-    assert len(fs["Cloud Implementation"]) == 8
-
-
-def test_job_matrix_size(workspace):
-    cfg = load_config(workspace / "config.yaml")
-    jobs = build_jobs(cfg, load_family_skills(cfg))
-    assert len(jobs) == 2 * 4 * 13
+def test_job_matrix_and_export_name(cfg):
+    jobs = build_jobs(cfg)
+    assert len(jobs) == 4 * 4 * 13
     assert len({j.key for j in jobs}) == len(jobs)
+    j = next(j for j in jobs if j.family == "Financial Planning & Analysis" and j.location.name == "Bengaluru")
+    assert j.export_name == "Accenture_Implement_Financial_Planning_Analysis_Bengaluru"
+    assert "Greater Bengaluru" in j.location.queries
 
 
-def test_dry_run_needs_no_placeholders(workspace, capsys):
-    assert main(["--config", str(workspace / "config.yaml"), "--dry-run", "--limit", "1"]) == 0
-    assert "ERP Implementation|Accenture|Bengaluru" in capsys.readouterr().out
+def test_location_without_aliases_uses_name(cfg):
+    assert cfg.companies[1].queries == ("TCS",)
 
 
-def test_real_run_refuses_placeholders(workspace):
-    assert main(["--config", str(workspace / "config.yaml")]) == 2
+def test_dry_run_needs_no_placeholders(capsys):
+    assert main(["--config", str(ROOT / "config.yaml"), "--dry-run", "--company", "TCS", "--location", "Pune",
+                 "--family", "Cloud Implementation"]) == 0
+    out = capsys.readouterr().out
+    assert "TCS_Implement_Cloud_Implementation_Pune" in out and "Terraform" in out
 
 
-def test_shipped_selectors_are_all_unresolved():
-    sel = load_selectors(ROOT / "selectors.yaml")
-    assert "export_button" in sel.unresolved() and "skills.option" in sel.unresolved()
+def test_real_run_refuses_placeholders(tmp_path):
+    (tmp_path / "selectors.yaml").write_text((ROOT / "selectors.yaml").read_text())
+    c = yaml.safe_load((ROOT / "config.yaml").read_text())
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(c))
+    assert main(["--config", str(tmp_path / "config.yaml")]) == 2
+
+
+def test_shipped_selectors_are_unresolved():
+    bad = load_selectors(ROOT / "selectors.yaml").unresolved()
+    assert {"nav_business", "export_save", "industry.input", "location.option"} <= set(bad)
 
 
 def test_resolved_selectors_pass():
     x = {"input": "//i", "option": "//o[{value}]"}
-    sel = Selectors(page_ready="//a", company=x, location=x, skills=x, results_ready="//r", export_button="//e")
+    keys = dict(nav_business="//n", nav_talent_insights="//t", page_ready="//p", results_ready="//r",
+                export_button="//e", export_name_input="//n", export_select_all="//a",
+                export_format_xlsx="//x", export_save="//s")
+    sel = Selectors(location=x, skills=x, industry=x, company=x, **keys)
     assert sel.unresolved() == []
 
 
 def test_xpath_literal():
-    assert xpath_literal("EY GDS") == "'EY GDS'"
+    assert xpath_literal("EY") == "'EY'"
     assert xpath_literal("it's") == '"it\'s"'
     assert xpath_literal("a'b\"c") == "concat('a', \"'\", 'b\"c')"
     assert fill_option("//li[.={value}]", "TCS") == "//li[.='TCS']"

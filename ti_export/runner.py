@@ -20,10 +20,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from .browser import make_driver, move_into_place, wait_for_xlsx, xlsx_snapshot
-from .loader import build_jobs, load_family_skills
-from .models import (
-    URL_PLACEHOLDER, Config, FilterXPaths, Job, Selectors, load_config, load_selectors, slug,
-)
+from .loader import build_jobs
+from .models import Config, FilterXPaths, Job, Selectors, load_config, load_selectors, slug
 
 log = logging.getLogger("ti_export")
 AUTH_WALL_MARKERS = ("/login", "/checkpoint", "/authwall", "/uas/")
@@ -66,19 +64,28 @@ class Manifest:
 
 
 class Exporter:
+    """LinkedIn -> Business -> Talent Insights once per session, then one clean reload per job."""
+
     def __init__(self, cfg: Config, sel: Selectors, driver, manifest: Manifest):
         self.cfg, self.sel, self.driver, self.manifest = cfg, sel, driver, manifest
         self.wait = WebDriverWait(driver, cfg.pacing.wait_timeout_s)
         self.incoming = cfg.output_dir / "_incoming"
         self.failures = cfg.output_dir / "_failures"
+        self.ti_handle: str | None = None
+        self.ti_url: str | None = None  # Talent Insights landing URL with no filters; reloaded per job
 
     # --- primitives -----------------------------------------------------
-    def _click(self, xpath: str) -> None:
+    def _click(self, xpath: str):
         el = self.wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
         try:
             el.click()
         except (ElementClickInterceptedException, StaleElementReferenceException):
             self.driver.execute_script("arguments[0].click();", el)
+        return el
+
+    def _guard_session(self) -> None:
+        if any(m in self.driver.current_url for m in AUTH_WALL_MARKERS):
+            raise AbortRun(f"Redirected to {self.driver.current_url}. Resolve login/verification manually, then rerun.")
 
     def _visible_input(self, fx: FilterXPaths):
         for el in self.driver.find_elements(By.XPATH, fx.input):
@@ -86,43 +93,83 @@ class Exporter:
                 return el
         return None
 
-    def _select(self, fx: FilterXPaths, value: str) -> None:
-        """Type `value` into the filter and click the matching option. Raises TimeoutException if no option."""
+    def _select(self, fx: FilterXPaths, value: str, seen: set[str]) -> bool:
+        """Type `value`, click its option. False if the option was already chosen (same label)."""
         box = self._visible_input(fx)
         if box is None and fx.open:
             self._click(fx.open)
         box = box or self.wait.until(EC.visibility_of_element_located((By.XPATH, fx.input)))
         box.send_keys(Keys.CONTROL, "a", Keys.DELETE)
         box.send_keys(value)
-        self._click(fill_option(fx.option, value))
+        option = self.wait.until(EC.element_to_be_clickable((By.XPATH, fill_option(fx.option, value))))
+        label = " ".join(option.text.split()) or value
+        if label in seen:
+            return False
+        try:
+            option.click()
+        except (ElementClickInterceptedException, StaleElementReferenceException):
+            self.driver.execute_script("arguments[0].click();", option)
+        seen.add(label)
         if fx.confirm:
             self._click(fx.confirm)
+        return True
+
+    def _select_many(self, fx: FilterXPaths, values: tuple[str, ...], label: str, job: Job) -> list[str]:
+        """Select every value that LinkedIn knows; returns the values that matched."""
+        matched, seen = [], set()
+        for v in values:
+            try:
+                if self._select(fx, v, seen):
+                    matched.append(v)
+            except TimeoutException:
+                log.warning("[%s] %s not found in LinkedIn: %s", job.key, label, v)
+        return matched
+
+    # --- session start --------------------------------------------------
+    def open_talent_insights(self) -> None:
+        self.driver.get(self.cfg.start_url)
+        self._guard_session()
+        before = set(self.driver.window_handles)
+        self._click(self.sel.nav_business)
+        self._click(self.sel.nav_talent_insights)
+        try:  # Talent Insights may open in a new tab
+            WebDriverWait(self.driver, 5).until(lambda d: len(d.window_handles) > len(before))
+            self.driver.switch_to.window(next(h for h in self.driver.window_handles if h not in before))
+        except TimeoutException:
+            pass
+        self._guard_session()
+        self.wait.until(EC.presence_of_element_located((By.XPATH, self.sel.page_ready)))
+        self.ti_handle, self.ti_url = self.driver.current_window_handle, self.driver.current_url
+        log.info("Talent Insights ready at %s", self.ti_url)
+
+    def _fresh_page(self) -> None:
+        if self.ti_url is None:
+            self.open_talent_insights()
+            return
+        self.driver.switch_to.window(self.ti_handle)
+        self.driver.get(self.ti_url)
+        self._guard_session()
+        self.wait.until(EC.presence_of_element_located((By.XPATH, self.sel.page_ready)))
 
     # --- one job --------------------------------------------------------
-    def run_job(self, job: Job) -> tuple[Path, list[str]]:
-        self.driver.get(self.cfg.report_url)
-        if any(m in self.driver.current_url for m in AUTH_WALL_MARKERS):
-            raise AbortRun(f"Redirected to {self.driver.current_url}. Resolve login/verification manually, then rerun.")
+    def run_job(self, job: Job) -> tuple[Path, dict]:
         try:
-            self.wait.until(EC.presence_of_element_located((By.XPATH, self.sel.page_ready)))
-            for label, fx, target in (("company", self.sel.company, job.company), ("location", self.sel.location, job.location)):
-                try:
-                    self._select(fx, target.query)
-                except TimeoutException as exc:
-                    raise JobError(f"{label} option not found: '{target.query}'") from exc
+            self._fresh_page()
+
+            locations = self._select_many(self.sel.location, job.location.queries, "location", job)
+            if not locations:
+                raise JobError(f"no location alias matched: {list(job.location.queries)}")
 
             if self.sel.skills_match_any:
                 self._click(self.sel.skills_match_any)
-            matched, unmatched = [], []
-            for skill in job.skills:
-                try:
-                    self._select(self.sel.skills, skill)
-                    matched.append(skill)
-                except TimeoutException:
-                    unmatched.append(skill)
-                    log.warning("[%s] skill not found in LinkedIn: %s", job.key, skill)
-            if len(matched) < self.cfg.pacing.min_skills_matched:
-                raise JobError(f"only {len(matched)} skill(s) matched; need {self.cfg.pacing.min_skills_matched}")
+            skills = self._select_many(self.sel.skills, job.skills, "skill", job)
+            if len(skills) < self.cfg.pacing.min_skills_matched:
+                raise JobError(f"only {len(skills)} skill(s) matched; need {self.cfg.pacing.min_skills_matched}")
+
+            if not self._select_many(self.sel.industry, (job.industry,), "industry", job):
+                raise JobError(f"industry not found: {job.industry}")
+            if not self._select_many(self.sel.company, job.company.queries, "company", job):
+                raise JobError(f"company not found: {list(job.company.queries)}")
 
             if self.sel.apply_filters:
                 self._click(self.sel.apply_filters)
@@ -131,8 +178,12 @@ class Exporter:
             self.incoming.mkdir(parents=True, exist_ok=True)
             before = xlsx_snapshot(self.incoming)
             self._click(self.sel.export_button)
-            if self.sel.export_confirm:
-                self._click(self.sel.export_confirm)
+            name_box = self.wait.until(EC.visibility_of_element_located((By.XPATH, self.sel.export_name_input)))
+            name_box.send_keys(Keys.CONTROL, "a", Keys.DELETE)
+            name_box.send_keys(job.export_name)
+            self._click(self.sel.export_select_all)
+            self._click(self.sel.export_format_xlsx)
+            self._click(self.sel.export_save)
             downloaded = wait_for_xlsx(self.incoming, before, self.cfg.pacing.download_timeout_s)
         except TimeoutException as exc:
             raise JobError(f"timed out waiting for UI element: {exc.msg or exc}") from exc
@@ -142,13 +193,14 @@ class Exporter:
             raise JobError(f"browser error: {exc.msg or exc}") from exc
 
         dest = move_into_place(downloaded, self.cfg.output_dir / slug(job.family) / job.filename)
-        return dest, unmatched
+        unmatched_skills = [s for s in job.skills if s not in skills]
+        unmatched_locs = [a for a in job.location.queries if a not in locations]
+        return dest, {"unmatched_skills": unmatched_skills, "unmatched_locations": unmatched_locs}
 
     def screenshot(self, job: Job, attempt: int) -> None:
         try:
             self.failures.mkdir(parents=True, exist_ok=True)
-            name = f"{slug(job.family)}__{job.filename[:-5]}__a{attempt}.png"
-            self.driver.save_screenshot(str(self.failures / name))
+            self.driver.save_screenshot(str(self.failures / f"{job.export_name}__a{attempt}.png"))
         except Exception:
             log.debug("screenshot failed", exc_info=True)
 
@@ -157,7 +209,7 @@ class Exporter:
         last_err = ""
         for attempt in range(1, p.retries + 2):
             try:
-                dest, unmatched = self.run_job(job)
+                dest, extra = self.run_job(job)
             except JobError as exc:
                 last_err = str(exc)
                 log.error("[%s] attempt %d failed: %s", job.key, attempt, last_err)
@@ -167,14 +219,15 @@ class Exporter:
                 continue
             self.manifest.record(
                 job.key, status="done", attempts=attempt, file=str(dest.relative_to(self.cfg.output_dir)),
-                unmatched_skills=unmatched, skills_requested=list(job.skills), error=None,
-                family=job.family, company=job.company.name, location=job.location.name,
+                skills_requested=list(job.skills), error=None, function=job.function,
+                family=job.family, company=job.company.name, location=job.location.name, **extra,
             )
-            log.info("[%s] done -> %s (unmatched skills: %d)", job.key, dest.name, len(unmatched))
+            log.info("[%s] done -> %s (unmatched skills=%d, locations=%d)", job.key, dest.name,
+                     len(extra["unmatched_skills"]), len(extra["unmatched_locations"]))
             return
         self.manifest.record(
             job.key, status="failed", attempts=p.retries + 1, error=last_err,
-            family=job.family, company=job.company.name, location=job.location.name,
+            function=job.function, family=job.family, company=job.company.name, location=job.location.name,
         )
 
 
@@ -202,21 +255,18 @@ def main(argv: list[str] | None = None) -> int:
         handlers=[logging.StreamHandler(), logging.FileHandler(cfg.output_dir / "run.log", encoding="utf-8")],
     )
 
-    jobs = select_jobs(build_jobs(cfg, load_family_skills(cfg)), args)
+    jobs = select_jobs(build_jobs(cfg), args)
     manifest = Manifest(cfg.output_dir / "manifest.json")
     pending = [j for j in jobs if not manifest.is_done(j.key)]
     log.info("%d jobs selected, %d already done, %d pending", len(jobs), len(jobs) - len(pending), len(pending))
 
     if args.dry_run:
         for j in pending:
-            print(f"{j.key}  skills={list(j.skills)}")
+            print(f"{j.export_name}\n    locations={list(j.location.queries)}\n    skills={list(j.skills)}")
         return 0
 
-    problems = []
-    if URL_PLACEHOLDER in cfg.report_url or not cfg.report_url.startswith("http"):
-        problems.append("config.yaml: report_url")
     sel = load_selectors(cfg.selectors_file)
-    problems += [f"selectors.yaml: {p}" for p in sel.unresolved()]
+    problems = [f"selectors.yaml: {p}" for p in sel.unresolved()]
     if problems:
         log.error("Fill these placeholders first:\n  %s", "\n  ".join(problems))
         return 2

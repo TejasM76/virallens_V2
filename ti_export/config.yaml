@@ -1,39 +1,79 @@
 # Paths are relative to this file.
-skills_workbook: input/Job Family Skills for Talent Insights 7419 1.xlsx
-sheet: 0
-function: Implement          # only rows with this Function are exported
-max_skill_columns: 8         # use Skill 1..8 only
+start_url: https://www.linkedin.com/feed/
+function: Implement
 
-companies:                   # name = file label; optional `search` = text typed into the filter
+# Rows 10-13 of the skills sheet, Skill 1..8 (transcribed from the screenshot: verify against the xlsx).
+job_families:
+  ERP Implementation:
+    - SAP S/4HANA
+    - SAP FICO
+    - SAP ABAP
+    - SAP SuccessFactors Applications
+    - Oracle Fusion Applications
+    - Workday
+    - Microsoft Dynamics 365
+    - ERP Implementations
+  Cloud Implementation:
+    - Amazon Web Services (AWS)
+    - Microsoft Azure
+    - Google Cloud Platform (GCP)
+    - Cloud Migration
+    - Kubernetes
+    - Terraform
+    - Docker
+    - CI/CD
+  System Integration:
+    - MuleSoft
+    - Dell Boomi
+    - SAP Cloud Platform Integration (CPI)
+    - RESTful APIs
+    - Microservices
+    - Spring Boot
+    - .NET Core
+    - Selenium
+  Financial Planning & Analysis:
+    - Anaplan
+    - Oracle Hyperion
+    - Oracle EPM Cloud
+    - OneStream
+    - SAP Business Planning and Consolidation (BPC)
+    - Oracle Essbase
+    - Workday Adaptive Planning
+    - Financial Consolidation
+
+industry: Professional       # text typed into the Industry filter; use the exact label LinkedIn shows if different
+
+companies:                   # one company per export
   - Accenture
   - TCS
   - Wipro
-  - EY GDS
+  - EY                       # check this resolves to the right EY entity (e.g. EY GDS) in the filter
 
-locations:                   # 13 listed in your note; add the 14th if there is one
-  - Bengaluru
-  - Delhi
-  - Mumbai
-  - Pune
-  - Bhubaneswar
-  - Hyderabad
-  - Chennai
-  - Coimbatore
-  - Kolkata
-  - Kochi
-  - Indore
-  - Visakhapatnam
-  - Lucknow
-  # - {name: Delhi, search: "Delhi, India"}   # example of a different search string
+# name = file label; aliases = every LinkedIn spelling selected together for that report.
+# Aliases LinkedIn doesn't know are skipped and listed in the manifest; at least one must match.
+# Aliases below are starting guesses: edit them to the labels the Location filter really offers.
+locations:
+  - {name: Bengaluru, aliases: [Bengaluru, Greater Bengaluru, "Bengaluru, Karnataka, India", Bangalore]}
+  - {name: Delhi, aliases: [Delhi, New Delhi, "Delhi, India", Greater Delhi Area]}
+  - {name: Mumbai, aliases: [Mumbai, Greater Mumbai, "Mumbai, Maharashtra, India"]}
+  - {name: Pune, aliases: [Pune, "Pune, Maharashtra, India", Pune/Pimpri-Chinchwad Area]}
+  - {name: Bhubaneswar, aliases: [Bhubaneswar, "Bhubaneswar, Odisha, India"]}
+  - {name: Hyderabad, aliases: [Hyderabad, "Hyderabad, Telangana, India", Greater Hyderabad Area]}
+  - {name: Chennai, aliases: [Chennai, "Chennai, Tamil Nadu, India", Greater Chennai Area]}
+  - {name: Coimbatore, aliases: [Coimbatore, "Coimbatore, Tamil Nadu, India"]}
+  - {name: Kolkata, aliases: [Kolkata, "Kolkata, West Bengal, India", Greater Kolkata Area]}
+  - {name: Kochi, aliases: [Kochi, "Kochi, Kerala, India"]}
+  - {name: Indore, aliases: [Indore, "Indore, Madhya Pradesh, India"]}
+  - {name: Visakhapatnam, aliases: [Visakhapatnam, "Visakhapatnam, Andhra Pradesh, India", Vizag]}
+  - {name: Lucknow, aliases: [Lucknow, "Lucknow, Uttar Pradesh, India"]}
 
-report_url: PASTE_REPORT_URL_HERE
 selectors_file: selectors.yaml
 output_dir: out
 merge_header_row: 0          # row index of the header in the exported xlsx (adjust if the export has a preamble)
 
 browser:
   name: chrome               # chrome | edge
-  mode: attach               # attach: start the browser with --remote-debugging-port=9222, log in yourself
+  mode: attach               # attach: start the browser with --remote-debugging-port=9222 and a separate --user-data-dir, log in yourself
   debugger_address: 127.0.0.1:9222
   user_data_dir: null        # only used when mode: launch
 

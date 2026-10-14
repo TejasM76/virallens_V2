@@ -1,38 +1,30 @@
 # ti_export: LinkedIn Talent Insights export automation (Python + Selenium)
 
-Exports one xlsx per **Job Family × Company × Location** for the `Implement` function, using Skill 1–8 of each family as the skill filter, then merges everything into one workbook. No Java needed: Selenium 4 manages the driver itself.
+One xlsx per **Job Family × Company × Location** for the `Implement` function (4 families × 4 companies × 13 locations = 208). Skills (Skill 1–8 of rows 10–13) are hard-coded in `config.yaml`.
 
-> LinkedIn's User Agreement restricts automated access. Run only on your own licensed account, keep the pacing defaults, and note the runner stops (never bypasses) on any login/verification page.
+Flow per session: LinkedIn → Business → Talent Insights (once), then per job: reload the clean Talent Insights page → Location (all aliases) → Skills → Industry → Company → Apply → Export (name `company_function_jobfamily_location`, Select all, xlsx, Save) → rename into `out/<family>/`.
+
+> LinkedIn's User Agreement restricts automated access. Use only your own licensed account, keep the pacing defaults, and note the runner stops (never bypasses) on any login/verification page.
 
 ## Setup (company laptop)
 ```bash
 pip install -r ti_export/requirements.txt
-# put the skills workbook at ti_export/input/Job Family Skills for Talent Insights 7419 1.xlsx
 ```
-1. `ti_export/config.yaml`: paste the report link into `report_url`; add the 14th location if there is one.
-2. `ti_export/selectors.yaml`: replace every `PASTE_XPATH_HERE`. Option XPaths use `{value}`, e.g. `//li[@role='option'][contains(normalize-space(.), {value})]`. Optional fields set to `""` are skipped.
-3. Start Chrome (or Edge, set `browser.name: edge`) with a debug port, log in to Talent Insights yourself, and leave it open:
-   ```bash
-   chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\ti-profile
+1. Start Chrome with a **separate profile** (Chrome 136+ ignores the debug port on the default profile), log in to LinkedIn yourself, leave it open:
    ```
+   "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir=C:\ti-profile
+   ```
+2. `selectors.yaml`: replace every `PASTE_XPATH_HERE` (nav, filters, results, export dialog). Option XPaths use `{value}`, e.g. `//li[@role='option'][normalize-space(.)={value}]`. Fields set to `""` are skipped.
+3. `config.yaml`: check `industry`, the company names (EY) and each location's `aliases` against what the filters actually offer.
 
 ## Run (from the repo root)
 ```bash
-python -m ti_export.runner --dry-run                 # job matrix + parsed skills, no browser
-python -m ti_export.runner --limit 2 --company TCS --location Pune   # smoke test
-python -m ti_export.runner                           # up to pacing.max_exports_per_session (25) jobs
-python -m ti_export.merge                            # out/combined.xlsx + "Run Audit" sheet
+python -m ti_export.runner --dry-run                                   # job matrix, names, aliases, skills
+python -m ti_export.runner --limit 2 --company TCS --location Pune --family "ERP Implementation"   # smoke test
+python -m ti_export.runner                                             # up to 25 jobs per session
+python -m ti_export.merge                                              # out/combined.xlsx + "Run Audit" sheet
 pytest ti_export/tests
 ```
-Rerun the same command until nothing is pending: `out/manifest.json` records finished jobs (resume), failures and skills LinkedIn didn't recognise. Failure screenshots go to `out/_failures/`, logs to `out/run.log`.
-
-## Layout
-| File | Role |
-|---|---|
-| `models.py` | Pydantic v2 config, `Job`, selector schema + placeholder check |
-| `loader.py` | xlsx → skills per Implement family → job matrix |
-| `browser.py` | driver attach/launch, download handling |
-| `runner.py` | per-job filter → export → rename, retries, pacing, manifest |
-| `merge.py` | consolidate exports, add job_family/company/location columns |
+Rerun until nothing is pending: `out/manifest.json` records finished jobs (resume), failures, and any skills / location aliases LinkedIn didn't recognise. Failure screenshots: `out/_failures/`; log: `out/run.log`.
 
 Exit codes: `0` ok, `2` placeholders unfilled, `3` login/verification wall, `130` interrupted.

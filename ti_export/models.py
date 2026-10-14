@@ -8,14 +8,13 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 XPATH_PLACEHOLDER = "PASTE_XPATH_HERE"
-URL_PLACEHOLDER = "PASTE_REPORT_URL_HERE"
 
 
 class Target(BaseModel, frozen=True):
-    """A company or location. `name` labels files; `search` is what gets typed into the filter."""
+    """A company or location. `name` labels files; `aliases` are every spelling typed into the filter."""
 
     name: str
-    search: str | None = None
+    aliases: tuple[str, ...] = ()
 
     @model_validator(mode="before")
     @classmethod
@@ -23,23 +22,30 @@ class Target(BaseModel, frozen=True):
         return {"name": v} if isinstance(v, str) else v
 
     @property
-    def query(self) -> str:
-        return self.search or self.name
+    def queries(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(self.aliases or (self.name,)))
 
 
 class Job(BaseModel, frozen=True):
+    function: str
     family: str
     company: Target
     location: Target
     skills: tuple[str, ...]
+    industry: str
 
     @property
     def key(self) -> str:
         return f"{self.family}|{self.company.name}|{self.location.name}"
 
     @property
+    def export_name(self) -> str:
+        """companyname_function_jobfamily_locationname"""
+        return "_".join(slug(p) for p in (self.company.name, self.function, self.family, self.location.name))
+
+    @property
     def filename(self) -> str:
-        return f"{slug(self.company.name)}__{slug(self.location.name)}.xlsx"
+        return f"{self.export_name}.xlsx"
 
 
 class BrowserCfg(BaseModel):
@@ -67,18 +73,25 @@ class PacingCfg(BaseModel):
 
 
 class Config(BaseModel):
-    skills_workbook: Path
-    sheet: str | int = 0
+    start_url: str = "https://www.linkedin.com/feed/"
     function: str = "Implement"
-    max_skill_columns: int = Field(8, ge=1)
+    job_families: dict[str, list[str]]
+    industry: str
     companies: list[Target]
     locations: list[Target]
-    report_url: str
     selectors_file: Path = Path("selectors.yaml")
     output_dir: Path = Path("out")
     merge_header_row: int = 0
     browser: BrowserCfg = BrowserCfg()
     pacing: PacingCfg = PacingCfg()
+
+    @field_validator("job_families")
+    @classmethod
+    def _skills(cls, v: dict[str, list[str]]):
+        for fam, skills in v.items():
+            if not skills or len(set(skills)) != len(skills):
+                raise ValueError(f"'{fam}': skills must be non-empty and unique")
+        return v
 
     @field_validator("companies", "locations")
     @classmethod
@@ -104,30 +117,38 @@ class FilterXPaths(BaseModel):
 
 
 class Selectors(BaseModel):
-    page_ready: str
-    company: FilterXPaths
+    nav_business: str  # "For Business" / "Business" menu on the LinkedIn top bar
+    nav_talent_insights: str  # "Talent Insights" entry in that menu
+    page_ready: str  # element proving the Talent Insights report page has loaded
     location: FilterXPaths
     skills: FilterXPaths
+    industry: FilterXPaths
+    company: FilterXPaths
     skills_match_any: str | None = None  # toggle to switch the skill filter to ANY, if the UI has one
     apply_filters: str | None = None
     results_ready: str
     export_button: str
-    export_confirm: str | None = None
+    export_name_input: str
+    export_select_all: str
+    export_format_xlsx: str
+    export_save: str
 
     def unresolved(self) -> list[str]:
         """Dotted paths of every field still empty or left at the placeholder."""
         required = {
-            "page_ready", "results_ready", "export_button",
-            "company.input", "company.option", "location.input", "location.option",
-            "skills.input", "skills.option",
+            "nav_business", "nav_talent_insights", "page_ready", "results_ready", "export_button",
+            "export_name_input", "export_select_all", "export_format_xlsx", "export_save",
+            *(f"{sec}.{f}" for sec in ("location", "skills", "industry", "company") for f in ("input", "option")),
         }
         bad: list[str] = []
         flat = {
-            "page_ready": self.page_ready, "results_ready": self.results_ready,
-            "export_button": self.export_button, "skills_match_any": self.skills_match_any,
-            "apply_filters": self.apply_filters, "export_confirm": self.export_confirm,
+            k: getattr(self, k) for k in (
+                "nav_business", "nav_talent_insights", "page_ready", "results_ready", "export_button",
+                "export_name_input", "export_select_all", "export_format_xlsx", "export_save",
+                "skills_match_any", "apply_filters",
+            )
         }
-        for sec in ("company", "location", "skills"):
+        for sec in ("location", "skills", "industry", "company"):
             for field, val in getattr(self, sec).model_dump().items():
                 flat[f"{sec}.{field}"] = val
         for path, val in flat.items():
@@ -152,7 +173,6 @@ def load_config(path: Path) -> Config:
     path = path.resolve()
     cfg = Config.model_validate(_read_yaml(path))
     base = path.parent
-    cfg.skills_workbook = cfg.skills_workbook if cfg.skills_workbook.is_absolute() else base / cfg.skills_workbook
     cfg.selectors_file = cfg.selectors_file if cfg.selectors_file.is_absolute() else base / cfg.selectors_file
     cfg.output_dir = cfg.output_dir if cfg.output_dir.is_absolute() else base / cfg.output_dir
     return cfg
